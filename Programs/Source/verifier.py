@@ -109,9 +109,10 @@ def verifier():
     def _(i):
         total.write(total.read() + result_array[i])
 
-    hits = total.read().reveal()
-    print_ln("Path is safe: %s", hits == 0)
-    print_ln("Hazards on path (count of matches): %s", hits)
+    hits_secret = total.read()
+    is_safe = hits_secret == 0  # 1 means safe/solved, 0 means unsafe
+    print_ln("Path is safe: %s", is_safe.reveal())
+    print_ln("Hazards on path (count of matches): %s", hits_secret.reveal())
 
 
 if __name__ == "__main__":

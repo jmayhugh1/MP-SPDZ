@@ -86,7 +86,8 @@ def private_path_query():
 
         # --- Bob (assume party 1 is "Bob"; if multiple Bobs, OR them) ---
         # In grid mode: 0 = safe, 1 = dangerous
-        # In graph mode: grid represents adjacency matrix where 1 = safe edge, 0 = dangerous/no edge
+        # In graph mode: edge-state matrix where 2 = traversable edge,
+        # and 0/1 mean non-traversable.
         # Party IDs 1..num_parties-1
         # We'll build a single "danger" bit per cell as OR across Bobs.
         danger_bits = Array(n, sint)
@@ -101,9 +102,11 @@ def private_path_query():
                     idx = cell_idx(r, c)
                     d = sint.get_input_from(bob)
                     if is_graph:
-                        # In graph mode: grid represents adjacency matrix where 1 = safe edge, 0 = dangerous/no edge
-                        # So we invert: danger = 1 - d (if d=1 safe, danger=0; if d=0 dangerous, danger=1)
-                        danger_bits[idx] = (danger_bits[idx] + (sint(1) - d)) > 0
+                        # Graph mode danger bit: 1 unless edge-state is traversable (2).
+                        traversable = d == sint(2)
+                        danger_bits[idx] = (
+                            danger_bits[idx] + (sint(1) - traversable)
+                        ) > 0
                     else:
                         # In grid mode: 0 = safe, 1 = dangerous
                         danger_bits[idx] = (danger_bits[idx] + d) > 0

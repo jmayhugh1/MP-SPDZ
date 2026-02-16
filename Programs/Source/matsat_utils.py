@@ -12,12 +12,12 @@ class MatSatUtils:
     def min1(x: sfix) -> sfix:
         """Returns min(x, 1)."""
         one = sfix(1)
-        cond = x < one
-        return cond * x + (one - cond) * one
+        cond = sfix(x < one)
+        return cond * x + (sfix(1) - cond) * one
 
     @staticmethod
-    def vector_norm(v: Matrix) -> sfix:
-        """Computes the L2 norm of a vector."""
+    def squared_l2_norm(v: Matrix) -> sfix:
+        """Returns sum(v_i^2), i.e., squared L2 norm (not sqrt)."""
         total = sfix(0)
 
         @for_range(len(v))
@@ -26,6 +26,11 @@ class MatSatUtils:
             total.update(total + v[i][0] * v[i][0])
 
         return total
+
+    @staticmethod
+    def sum_sq(v: Matrix) -> sfix:
+        """Backward-compatible alias for squared_l2_norm()."""
+        return MatSatUtils.squared_l2_norm(v)
 
     @staticmethod
     def create_constant_vector(size: int, val) -> Matrix:
@@ -40,13 +45,13 @@ class MatSatUtils:
 
     @staticmethod
     def less_than_threshold(a: Matrix, theta: sfix) -> Matrix:
-        """Returns a matrix where each element is 1 if a[i] < theta, else 0."""
+        """Returns a secret-bit mask b where b[i]=1 iff a[i] < theta."""
         m_len = len(a)
-        b = Matrix(m_len, 1, sfix)
+        b = Matrix(m_len, 1, sint)
 
         @for_range(m_len)
         def _(i):
-            b[i][0] = sfix.less_than(a[i][0], theta)
+            b[i][0] = a[i][0] < theta
 
         return b
 
@@ -150,7 +155,7 @@ class MatSatUtils:
         max_try: int = 5,
         max_itr: int = 10,
         print_results: bool = False,
-        weighted: bool = True,
+        weighted: bool = False,
     ) -> Tuple[Matrix, Matrix, sint, sfix]:
         """
         MatSat solve algorithm.
@@ -257,8 +262,21 @@ class MatSatUtils:
             u_tilde[i][0] = sfix.get_random(0, 1)
 
         u = Matrix(n, 1, sint)
-        err = sfix(0)
         is_solved = sint(0)
+        # SAT-style gating mask (0/1): clause is counted if active_mask > 0.
+        active_bits = Matrix(m, 1, sint)
+
+        @for_range(m)
+        def _(i):
+            active_bits[i][0] = active_mask[i][0] > sfix(0)
+
+        # Reuse matrices across iterations to reduce MPC allocation churn.
+        u_tilde_d = Matrix(2 * n, 1, sfix)
+        min1_Q_utilde_d = Matrix(m, 1, sfix)
+        bin_Qud_sfix = Matrix(m, 1, sfix)
+        new_u_tilde = Matrix(n, 1, sfix)
+        new_u = Matrix(n, 1, sint)
+        u_d = Matrix(2 * n, 1, sfix)
 
         # -- Main optimization loop --
         # Outer try loop
@@ -269,11 +287,7 @@ class MatSatUtils:
             # Inner iteration loop
             @for_range(max_itr)
             def __(iter_idx):
-                nonlocal is_solved, err
-                err.update(0)
-
-                # Dual vector u_d = [u; 1-u]
-                u_tilde_d = Matrix(2 * n, 1, sfix)
+                nonlocal is_solved
 
                 @for_range(n)
                 def ___(i):
@@ -283,8 +297,6 @@ class MatSatUtils:
                 Q_utilde_d = Q.dot(u_tilde_d)  # m x 1
 
                 # Compute satisfaction with optional active gating
-                min1_Q_utilde_d = Matrix(m, 1, sfix)
-
                 @for_range(m)
                 def ___(i):
                     min1_Q_utilde_d[i][0] = MatSatUtils.min1(Q_utilde_d[i][0])
@@ -297,7 +309,7 @@ class MatSatUtils:
                     jsat_first_term = one_m.transpose().dot(
                         w_c.schur(one_m - min1_Q_utilde_d)
                     )
-                    jsat_reg_term = (l / 2) * MatSatUtils.vector_norm(
+                    jsat_reg_term = (l / 2) * MatSatUtils.squared_l2_norm(
                         w_v.schur(u_tilde.schur(one_n - u_tilde))
                     )
 
@@ -306,7 +318,7 @@ class MatSatUtils:
                     jsat_first_term = one_m.transpose().dot(
                         active_mask.schur(one_m - min1_Q_utilde_d)
                     )
-                    jsat_reg_term = (l / 2) * MatSatUtils.vector_norm(
+                    jsat_reg_term = (l / 2) * MatSatUtils.squared_l2_norm(
                         u_tilde.schur(one_n - u_tilde)
                     )
 
@@ -314,11 +326,17 @@ class MatSatUtils:
 
                 # Jacobian calculation
 
-                # Compute bin_Qud = 1{ Q·u_d < 1 }
+                # Compute bin_Qud = 1{ Q·u_d < 1 } as secret bits, then cast to sfix.
                 bin_Qud = MatSatUtils.less_than_threshold(Q_utilde_d, sfix(1))
 
+                @for_range(m)
+                def ___(i):
+                    bin_Qud_sfix[i][0] = sfix(bin_Qud[i][0])
+
                 if weighted:
-                    jsatacb_first_term = (Q_diff.transpose()).dot(w_c.schur(bin_Qud))
+                    jsatacb_first_term = (Q_diff.transpose()).dot(
+                        w_c.schur(bin_Qud_sfix)
+                    )
 
                     jsatacb_reg_term = l_n.schur(
                         w_v_sq.schur(
@@ -331,7 +349,7 @@ class MatSatUtils:
                     )
                 else:
                     jsatacb_first_term = Q_diff.transpose().dot(
-                        active_mask.schur(bin_Qud)
+                        active_mask.schur(bin_Qud_sfix)
                     )
 
                     jsatacb_reg_term = l_n.schur(
@@ -341,18 +359,16 @@ class MatSatUtils:
                     )
 
                 jsatacb = jsatacb_first_term + jsatacb_reg_term
-                jsatacb_norm = MatSatUtils.vector_norm(jsatacb)
+                grad_sq = MatSatUtils.squared_l2_norm(jsatacb)
 
                 epsilon = sfix(1e-8)
-                alpha = jsat / (jsatacb_norm + epsilon)
+                # Keep denominator as squared gradient norm (paper-consistent scaling).
+                alpha = jsat / (grad_sq + epsilon)
                 # Keep gradient updates numerically stable in fixed-point.
-                alpha_cap = sfix(1)
+                alpha_cap = sfix(5)
                 alpha = (alpha > alpha_cap).if_else(
                     alpha_cap, (alpha < -alpha_cap).if_else(-alpha_cap, alpha)
                 )
-
-                # Gradient step
-                new_u_tilde = Matrix(n, 1, sfix)
 
                 @for_range(n)
                 def ___(i):
@@ -363,39 +379,32 @@ class MatSatUtils:
                         sfix(0), (updated > sfix(1)).if_else(sfix(1), updated)
                     )
 
-                # Threshold
+                # Fixed projection threshold.
                 threshold = sfix(0.5)
-                new_u = Matrix(n, 1, sint)
 
                 @for_range(n)
                 def ___(i):
                     new_u[i][0] = sint(1) - (new_u_tilde[i][0] < threshold)
-
-                # Compute error using new_u
-                u_d = Matrix(2 * n, 1, sfix)
-
-                @for_range(n)
-                def ___(i):
                     u_d[i][0] = sfix(new_u[i][0])
                     u_d[i + n][0] = sfix(1) - sfix(new_u[i][0])
 
                 Q_ud = Q.dot(u_d)
+                err_count = MemValue(sint(0))
 
-                # Error computation
                 @for_range(m)
                 def ___(i):
-                    nonlocal err
-                    min1_val = MatSatUtils.min1(Q_ud[i][0])
-                    err.update(err + active_mask[i][0] * (sfix(1) - min1_val))
+                    violated = Q_ud[i][0] < sfix(1)
+                    err_count.write(err_count.read() + active_bits[i][0] * violated)
 
-                zero_err = err == sfix(0)
+                zero_err = err_count.read() == sint(0)
 
                 # Freeze if solved
                 @for_range(n)
                 def ___(i):
+                    solved_sfix = sfix(is_solved)
                     u_tilde[i][0] = (
-                        is_solved * u_tilde[i][0]
-                        + (sfix(1) - is_solved) * new_u_tilde[i][0]
+                        solved_sfix * u_tilde[i][0]
+                        + (sfix(1) - solved_sfix) * new_u_tilde[i][0]
                     )
                     u[i][0] = is_solved * u[i][0] + (sint(1) - is_solved) * new_u[i][0]
 
@@ -431,8 +440,8 @@ class MatSatUtils:
 
         @for_range(n)
         def _(i):
-            u_final_d[i][0] = u[i][0]
-            u_final_d[i + n][0] = sint(1) - u[i][0]
+            u_final_d[i][0] = sfix(u[i][0])
+            u_final_d[i + n][0] = sfix(1) - sfix(u[i][0])
 
         check_final = Q.dot(u_final_d)
 
@@ -446,6 +455,14 @@ class MatSatUtils:
         if print_results:
             print_ln("is_solved = %s", is_solved.reveal())
             print_ln("satisfied clauses = %s", satisfied_clauses.reveal())
+            # Structured result payload for robust parsing by Python-side helpers.
+            print_ln("RESULT_TYPE=MatSatResult")
+            print_ln("RESULT_IS_SOLVED=%s", is_solved.reveal())
+            print_ln("RESULT_SATISFIED_CLAUSES=%s", satisfied_clauses.reveal())
+
+            @for_range(n)
+            def _(i):
+                print_ln("RESULT_U[%s]=%s", i, u[i][0].reveal())
 
         return u_tilde, u, is_solved, satisfied_clauses
 

@@ -110,9 +110,9 @@ def matsat():
         l=2.0,
         beta=sfix(0.5),
         max_try=5,
-        max_itr=10,
+        max_itr=20,
         print_results=True,
-        weighted=True,
+        weighted=False,
     )
 
 

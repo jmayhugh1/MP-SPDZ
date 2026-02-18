@@ -405,6 +405,10 @@ class MatSatUtils:
                     nonlocal err
                     min1_val = MatSatUtils.min1(Q_ud[i][0])
                     err.update(err + active_mask[i][0] * (sfix(1) - min1_val))
+                    # Keep solved-status tied to real clause violations.
+                    err_count.write(
+                        err_count.read() + active_bits[i][0] * (Q_ud[i][0] < sfix(1))
+                    )
 
                 zero_err = err_count.read() == sint(0)
 

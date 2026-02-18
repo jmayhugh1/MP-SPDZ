@@ -90,10 +90,10 @@ print_ln("Formula by Input Vector: %s", "{formula_str}")
 print_ln("=" * 60)
 
 Q = create_q_matrix(clauses, n, m)
-active = create_weight_vector(m, weights)
+clause_weights = create_weight_vector(m, weights)
 
 u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
-    Q=Q, n=n, m=m, active=active, l=2.0, max_try=5, max_itr=5, weighted=True, print_results=True
+    Q=Q, n=n, m=m, clause_weights=clause_weights, l=2.0, max_try=5, max_itr=5, weighted=True, print_results=True
 )
 
 print_ln("Test completed successfully")
@@ -473,10 +473,10 @@ print_ln("Formula by Input Vector: %s", "{formula_str}")
 print_ln("=" * 60)
 
 Q = create_q_matrix(clauses, n, m)
-active = create_weight_vector(m, weights)
+clause_weights = create_weight_vector(m, weights)
 
 u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
-    Q=Q, n=n, m=m, active=active, l=2.0, max_try=5, max_itr=5, weighted=True, print_results=True
+    Q=Q, n=n, m=m, clause_weights=clause_weights, l=2.0, max_try=5, max_itr=5, weighted=True, print_results=True
 )
 print_ln("Test completed successfully")
 '''

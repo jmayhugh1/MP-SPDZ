@@ -148,7 +148,7 @@ class MatSatUtils:
         Q: Matrix,
         n: int,
         m: int,
-        active: Optional[Matrix] = None,
+        clause_weights: Optional[Matrix] = None,
         variable_weights: Optional[Matrix] = None,
         l: float = 2.0,
         beta: sfix = None,
@@ -165,8 +165,8 @@ class MatSatUtils:
                and next n columns are negative literals.
             n: Number of variables.
             m: Number of clauses/rows.
-            active: Optional matrix of size (m x 1) for active clause gating.
-                   If None, all clauses are active.
+            clause_weights: Optional matrix of size (m x 1) for clause weighting.
+                   If None, all clauses are weighted equally (weight=1).
             variable_weights: Optional matrix of size (n x 1). When provided and
                    weighted=True, these values are used as variable weights.
             l: Regularization parameter.
@@ -197,9 +197,6 @@ class MatSatUtils:
         l_n = MatSatUtils.create_constant_vector(n, l)
 
         w_v, w_v_sq, w_c = None, None, None
-        # In unweighted mode, we still support clause gating through `active`.
-        # If no active mask is provided, treat all clauses as active.
-        active_mask = active if active is not None else one_m
 
         if weighted:
             # Weight vectors for weighted MATSAT
@@ -236,11 +233,8 @@ class MatSatUtils:
                     w_v[i][0] = val
                     w_v_sq[i][0] = val * val
 
-            # [IMPORTANT] This efectively replaces the old clause active gating
-            # logic. If there is an active weight vector as input, then we are
-            # solving for weighted MAXSAT.
-            if active is not None:
-                w_c = active
+            if clause_weights is not None:
+                w_c = clause_weights
             else:
                 w_v_expanded = Matrix(2 * n, 1, sfix)
 
@@ -253,6 +247,9 @@ class MatSatUtils:
                 w_c = Q.dot(w_v_expanded)
 
             # End of weighted setup
+        else:
+            # Unweighted mode still supports per-clause weighting and gating.
+            w_c = clause_weights if clause_weights is not None else one_m
 
         # Initialize relaxed assignment u_tilde in [0,1]^n
         u_tilde = Matrix(n, 1, sfix)
@@ -267,13 +264,13 @@ class MatSatUtils:
         # Track best solution found so far
         best_u = Matrix(n, 1, sint)
         min_err = sfix(m + 1.0)
-        # SAT-style gating mask (0/1): clause is counted if active_mask > 0.
+        # SAT-style gating mask (0/1): clause is counted if its weight > 0.
         active_bits = Matrix(m, 1, sint)
         err = sfix(0)
 
         @for_range(m)
         def _(i):
-            active_bits[i][0] = active_mask[i][0] > sfix(0)
+            active_bits[i][0] = w_c[i][0] > sfix(0)
 
         # Reuse matrices across iterations to reduce MPC allocation churn.
         u_tilde_d = Matrix(2 * n, 1, sfix)
@@ -305,7 +302,7 @@ class MatSatUtils:
 
                 Q_utilde_d = Q.dot(u_tilde_d)  # m x 1
 
-                # Compute satisfaction with optional active gating
+                # Compute per-clause satisfaction.
                 @for_range(m)
                 def ___(i):
                     min1_Q_utilde_d[i][0] = MatSatUtils.min1(Q_utilde_d[i][0])
@@ -325,7 +322,7 @@ class MatSatUtils:
                 else:
                     # Jsat = 1_{m \times 1} \dot (1_{m \times 1} - \min_1(Q\tilde{u}^d)))
                     jsat_first_term = one_m.transpose().dot(
-                        active_mask.schur(one_m - min1_Q_utilde_d)
+                        w_c.schur(one_m - min1_Q_utilde_d)
                     )
                     jsat_reg_term = (l / 2) * MatSatUtils.squared_l2_norm(
                         u_tilde.schur(one_n - u_tilde)
@@ -357,9 +354,7 @@ class MatSatUtils:
                         )
                     )
                 else:
-                    jsatacb_first_term = Q_diff.transpose().dot(
-                        active_mask.schur(bin_Qud_sfix)
-                    )
+                    jsatacb_first_term = Q_diff.transpose().dot(w_c.schur(bin_Qud_sfix))
 
                     jsatacb_reg_term = l_n.schur(
                         u_tilde.schur(one_n - u_tilde).schur(
@@ -404,7 +399,7 @@ class MatSatUtils:
                 def ___(i):
                     nonlocal err
                     min1_val = MatSatUtils.min1(Q_ud[i][0])
-                    err.update(err + active_mask[i][0] * (sfix(1) - min1_val))
+                    err.update(err + w_c[i][0] * (sfix(1) - min1_val))
                     # Keep solved-status tied to real clause violations.
                     err_count.write(
                         err_count.read() + active_bits[i][0] * (Q_ud[i][0] < sfix(1))
@@ -448,13 +443,6 @@ class MatSatUtils:
                     sfix(0), (mixed > sfix(1)).if_else(sfix(1), mixed)
                 )
 
-            # Print results if requested (after each try, matching original behavior)
-            if print_results:
-
-                @for_range(n)
-                def _(i):
-                    print_ln("u[%s] = %s", i, u[i][0].reveal())
-
         # Calculate number of satisfied clauses only after last iteration
         satisfied_clauses = sfix(0)
 
@@ -464,6 +452,12 @@ class MatSatUtils:
             u[i][0] = best_u[i][0]
 
         u_final_d = Matrix(2 * n, 1, sfix)
+        # Print results if requested (after each try, matching original behavior)
+        if print_results:
+
+            @for_range(n)
+            def _(i):
+                print_ln("u[%s] = %s", i, u_final_d[i][0].reveal())
 
         @for_range(n)
         def _(i):
@@ -475,9 +469,7 @@ class MatSatUtils:
         @for_range(m)
         def _(i):
             is_satisfied = MatSatUtils.min1(check_final[i][0])
-            satisfied_clauses.update(
-                satisfied_clauses + active_mask[i][0] * is_satisfied
-            )
+            satisfied_clauses.update(satisfied_clauses + w_c[i][0] * is_satisfied)
 
         if print_results:
             print_ln("is_solved = %s", is_solved.reveal())

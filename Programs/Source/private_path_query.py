@@ -75,9 +75,9 @@ def private_path_query():
         Q = Matrix(m, lit_len, sfix)  # MatSat uses sfix arithmetic
         Q.assign_all(0)
 
-        # active mask: 1 => clause counts, 0 => ignore clause (treat as satisfied)
-        active = Matrix(m, 1, sfix)
-        active.assign_all(0)
+        # Clause weights: 1 => clause counts, 0 => ignore clause.
+        clause_weights = Matrix(m, 1, sfix)
+        clause_weights.assign_all(0)
 
         def cell_idx(r, c):
             return r * grid_size + c
@@ -124,13 +124,13 @@ def private_path_query():
                 row = cell  # rows 0..n-1 reserved for Bob-constraints
 
                 d = danger_bits[cell]  # sint 0/1
-                active[row][0] = sfix(d)  # only dangerous cells create active clauses
+                clause_weights[row][0] = sfix(d)  # only dangerous cells count
                 # Clause is ¬x_cell, so put coefficient in NEGATIVE half column (n + cell)
                 Q[row][n + cell] = sfix(
                     d
-                )  # if d=0 this stays 0; gated by active anyway
+                )  # if d=0 this stays 0; clause weight is also 0
 
-        # For each step, add an active clause row that one-hots the visited cell in the POSITIVE half
+        # For each step, add a counted clause row that one-hots the visited cell in POSITIVE half.
         @for_range_multithread(
             n_threads=num_threads,
             n_parallel=(path_length // num_threads) + 1,
@@ -138,7 +138,7 @@ def private_path_query():
         )
         def _(i):
             row = n + i
-            active[row][0] = sfix(1)
+            clause_weights[row][0] = sfix(1)
 
             @for_range_opt(grid_size)
             def __(r):
@@ -149,10 +149,10 @@ def private_path_query():
                     Q[row][cell] = sfix(cond)  # positive literal x_cell
 
         print_ln(Q.reveal())
-        return Q, active, n, m
+        return Q, clause_weights, n, m
 
     # -----------------------
-    # MatSat solve loop (with active gating)
+    # MatSat solve loop
     # -----------------------
     num_parties, grid_size, query_size, num_threads, is_graph = get_arg_info()
 
@@ -160,16 +160,16 @@ def private_path_query():
     qx, qy, path_length = PrivatePathQueryUtils.create_path(query_size, is_graph)
 
     # Build Q matrix using the path
-    Q, active, n, m = build_Q(
+    Q, clause_weights, n, m = build_Q(
         num_parties, grid_size, query_size, num_threads, qx, qy, path_length, is_graph
     )
 
-    # Use MatSat solve from utility class with active gating
+    # Use MatSat solve from utility class with clause weights.
     u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
         Q=Q,
         n=n,
         m=m,
-        active=active,  # Use active gating for private path query
+        clause_weights=clause_weights,
         l=2.0,
         beta=sfix(0.5),
         max_try=5,

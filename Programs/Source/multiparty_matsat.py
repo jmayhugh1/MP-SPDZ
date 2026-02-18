@@ -105,7 +105,6 @@ def matsat():
         Q=Q,
         n=n,
         m=m,
-        active=None,  # No active gating for standard MatSat
         variable_weights=variable_weights,
         l=2.0,
         beta=sfix(0.5),

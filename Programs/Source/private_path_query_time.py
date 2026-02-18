@@ -104,8 +104,8 @@ def private_path_query_time():
         Q = Matrix(m, lit_len, sfix)
         Q.assign_all(0)
 
-        active = Matrix(m, 1, sfix)
-        active.assign_all(0)
+        clause_weights = Matrix(m, 1, sfix)
+        clause_weights.assign_all(0)
 
         def cell_idx(r, c):
             return r * grid_size + c
@@ -153,7 +153,7 @@ def private_path_query_time():
                     v = var_idx(cell, t)
                     row = v
                     d = danger[v]  # sint bit
-                    active[row][0] = sfix(d)
+                    clause_weights[row][0] = sfix(d)
                     # put ¬x_{cell,t} in negative half at column N + v
                     Q[row][N + v] = sfix(d)
 
@@ -188,7 +188,7 @@ def private_path_query_time():
         )
         def _(t):
             row = N + t
-            active[row][0] = sfix(1)
+            clause_weights[row][0] = sfix(1)
 
             @for_range_opt(grid_size)
             def __(r):
@@ -199,13 +199,13 @@ def private_path_query_time():
                     cond = (qx[t] == r) * (qy[t] == c)  # sint bit
                     Q[row][v] = sfix(cond)  # x_{cell,t} in positive half
 
-        return Q, active, n, N, m
+        return Q, clause_weights, n, N, m
 
     # -----------------------
     # main
     # -----------------------
     num_parties, grid_size, query_size, num_threads = get_arg_info()
-    Q, active, n_cells, N_vars, m_rows = build_Q_time(
+    Q, clause_weights, n_cells, N_vars, m_rows = build_Q_time(
         num_parties=num_parties,
         grid_size=grid_size,
         query_size=query_size,
@@ -217,7 +217,7 @@ def private_path_query_time():
         Q=Q,
         n=N_vars,  # IMPORTANT: now n is time-indexed variable count N
         m=m_rows,
-        active=active,
+        clause_weights=clause_weights,
         l=2.0,
         beta=sfix(0.5),
         max_try=5,

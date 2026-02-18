@@ -50,7 +50,6 @@ u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
     Q=Q,
     n=n,
     m=m,
-    active=None,
     l={l_value},
     beta=sfix({beta_value}),
     max_try={max_try},

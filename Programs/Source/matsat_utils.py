@@ -153,7 +153,7 @@ class MatSatUtils:
         l: float = 2.0,
         beta: sfix = None,
         max_try: int = 5,
-        max_itr: int = 10,
+        max_itr: int = 40,
         print_results: bool = False,
         weighted: bool = False,
     ) -> Tuple[Matrix, Matrix, sint, sfix]:
@@ -365,7 +365,7 @@ class MatSatUtils:
                 # Keep denominator as squared gradient norm (paper-consistent scaling).
                 alpha = jsat / (grad_sq + epsilon)
                 # Keep gradient updates numerically stable in fixed-point.
-                alpha_cap = sfix(5)
+                alpha_cap = sfix(1000)
                 alpha = (alpha > alpha_cap).if_else(
                     alpha_cap, (alpha < -alpha_cap).if_else(-alpha_cap, alpha)
                 )

@@ -4,6 +4,7 @@ from Compiler.types import Matrix, Array, sint, MemValue
 from Compiler.library import for_range, print_ln
 from typing import Tuple
 from private_path_query_utils import PrivatePathQueryUtils
+from matsat_utils import MatSatUtils
 
 """ compilation instructions
 export PYTHONPATH=/Users/joshuamayhugh/Projects/aima-python/MP-SPDZ
@@ -34,6 +35,7 @@ compiler = Compiler(usage=usage)
 compiler.parser.add_option("--num_parties", dest="num_parties", type=int)
 compiler.parser.add_option("--grid_size", dest="grid_size", type=int)
 compiler.parser.add_option("--query_size", dest="query_size", type=int)
+compiler.parser.add_option("--iteration_no", dest="iteration_no", type=int, default=0)
 compiler.parser.add_option(
     "--is_graph", dest="is_graph", action="store_true", default=False
 )
@@ -41,7 +43,7 @@ compiler.parser.add_option(
 
 @compiler.register_function("verifier")
 def verifier():
-    def get_arg_info() -> Tuple[int, int, int, bool]:
+    def get_arg_info() -> Tuple[int, int, int, int, bool]:
         compiler.parse_args()
         if not compiler.options.num_parties:
             print("Error: num_parties argument is required")
@@ -56,17 +58,20 @@ def verifier():
             compiler.options.num_parties,
             compiler.options.grid_size,
             compiler.options.query_size,
+            compiler.options.iteration_no or 0,
             compiler.options.is_graph,
         )
 
-    num_parties, grid_size, query_size, is_graph = get_arg_info()
+    num_parties, grid_size, query_size, iteration_no, is_graph = get_arg_info()
 
     def get_path_from_bob(hazard_matrix: Matrix, bob_id: int) -> None:
         """
         Get all hazard locations from Bob and OR them into the hazard matrix.
 
         In grid mode, hazard_matrix[i][j] represents whether cell (i,j) is hazardous.
-        In graph mode, hazard_matrix[u][v] represents whether edge (u -> v) is hazardous.
+        In graph mode, Bob supplies edge-state values:
+          2 = traversable edge, 1 = blocked edge, 0 = no edge.
+        Non-traversable (0/1) is treated as hazardous for the queried path.
         """
         assert (
             bob_id >= 1 and bob_id < num_parties
@@ -74,7 +79,11 @@ def verifier():
         for i in range(grid_size):
             for j in range(grid_size):
                 d = sint.get_input_from(bob_id)
-                hazard_matrix[i][j] = (hazard_matrix[i][j] + d) > 0
+                if is_graph:
+                    hazard_bit = sint(1) - (d == sint(2))
+                else:
+                    hazard_bit = d
+                hazard_matrix[i][j] = (hazard_matrix[i][j] + hazard_bit) > 0
 
     # Path length differs between grid and graph modes.
     # - Grid mode: query_size is number of moves; path length is query_size + 1 (including start).
@@ -109,9 +118,22 @@ def verifier():
     def _(i):
         total.write(total.read() + result_array[i])
 
-    hits = total.read().reveal()
-    print_ln("Path is safe: %s", hits == 0)
-    print_ln("Hazards on path (count of matches): %s", hits)
+    hits_secret = total.read()
+    is_safe = hits_secret == 0  # 1 means safe/solved, 0 means unsafe
+    prior, _ = MatSatUtils.load_prior(grid_size, iteration_no)
+    posterior, info_gain = MatSatUtils.update_prior(
+        prior, qx, qy, grid_size, path_length, is_safe
+    )
+    MatSatUtils.save_posterior(posterior, grid_size)
+
+    print_ln("information_gain= %s", info_gain.reveal())
+    print_ln("Path is safe: %s", is_safe.reveal())
+    print_ln("Hazards on path (count of matches): %s", hits_secret.reveal())
+    # Structured result payload for robust parsing by Python-side helpers.
+    print_ln("RESULT_TYPE=VerifierResult")
+    print_ln("RESULT_IS_SOLVED=%s", is_safe.reveal())
+    print_ln("RESULT_INFORMATION_GAIN=%s", info_gain.reveal())
+    print_ln("RESULT_HAZARDS_ON_PATH=%s", hits_secret.reveal())
 
 
 if __name__ == "__main__":

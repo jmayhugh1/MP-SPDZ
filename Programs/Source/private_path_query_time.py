@@ -213,7 +213,7 @@ def private_path_query_time():
     )
 
     # Solve
-    u_tilde, u, is_solved = MatSatUtils.solve_matsat(
+    u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
         Q=Q,
         n=N_vars,  # IMPORTANT: now n is time-indexed variable count N
         m=m_rows,

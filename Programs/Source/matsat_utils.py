@@ -263,8 +263,13 @@ class MatSatUtils:
 
         u = Matrix(n, 1, sint)
         is_solved = sint(0)
+
+        # Track best solution found so far
+        best_u = Matrix(n, 1, sint)
+        min_err = sfix(m + 1.0)
         # SAT-style gating mask (0/1): clause is counted if active_mask > 0.
         active_bits = Matrix(m, 1, sint)
+        err = sfix(0)
 
         @for_range(m)
         def _(i):
@@ -287,7 +292,11 @@ class MatSatUtils:
             # Inner iteration loop
             @for_range(max_itr)
             def __(iter_idx):
-                nonlocal is_solved
+                nonlocal is_solved, err, min_err
+                err.update(0)
+
+                # Dual vector u_d = [u; 1-u]
+                u_tilde_d = Matrix(2 * n, 1, sfix)
 
                 @for_range(n)
                 def ___(i):
@@ -393,10 +402,19 @@ class MatSatUtils:
 
                 @for_range(m)
                 def ___(i):
-                    violated = Q_ud[i][0] < sfix(1)
-                    err_count.write(err_count.read() + active_bits[i][0] * violated)
+                    nonlocal err
+                    min1_val = MatSatUtils.min1(Q_ud[i][0])
+                    err.update(err + active_mask[i][0] * (sfix(1) - min1_val))
 
                 zero_err = err_count.read() == sint(0)
+
+                # Update best solution if current error is lower than min_err
+                update_best = err < min_err
+                min_err.update(update_best.if_else(err, min_err))
+
+                @for_range(n)
+                def ___(i):
+                    best_u[i][0] = update_best.if_else(new_u[i][0], best_u[i][0])
 
                 # Freeze if solved
                 @for_range(n)
@@ -435,6 +453,11 @@ class MatSatUtils:
 
         # Calculate number of satisfied clauses only after last iteration
         satisfied_clauses = sfix(0)
+
+        # Use the best u found across all iterations
+        @for_range(n)
+        def _(i):
+            u[i][0] = best_u[i][0]
 
         u_final_d = Matrix(2 * n, 1, sfix)
 

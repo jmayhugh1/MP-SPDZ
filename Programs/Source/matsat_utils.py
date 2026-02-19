@@ -469,7 +469,7 @@ class MatSatUtils:
         @for_range(m)
         def _(i):
             is_satisfied = MatSatUtils.min1(check_final[i][0])
-            satisfied_clauses.update(satisfied_clauses + w_c[i][0] * is_satisfied)
+            satisfied_clauses.update(satisfied_clauses + is_satisfied)
 
         if print_results:
             print_ln("is_solved = %s", is_solved.reveal())

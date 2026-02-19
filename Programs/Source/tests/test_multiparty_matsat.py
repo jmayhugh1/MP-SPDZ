@@ -134,6 +134,91 @@ def test_matsat_utils_sat_example_custom_solver_params():
 
 
 @pytest.mark.integration
+def test_matsat_utils_weighted_clause_vector_sat_sum():
+    """
+    Weighted SAT: all clauses are satisfiable, so weighted satisfied total should
+    match the sum of clause weights.
+    """
+    clause_weights = [2.5, 7.0, 0.5]
+    is_solved, satisfied, u_vector = compile_and_run_matsat_utils_case(
+        program_name="test_matsat_utils_weighted_sat_sum",
+        q_rows=[[1, 0], [1, 0], [1, 0]],
+        n=1,
+        num_parties=3,
+        port=5031,
+        clause_weights=clause_weights,
+        weighted=True,
+        return_u=True,
+    )
+    print(f"[weighted_sat_sum] u={u_vector}")
+    assert is_solved == 1
+    assert satisfied is not None
+    assert satisfied == pytest.approx(sum(clause_weights), rel=1e-6, abs=1e-6)
+
+
+@pytest.mark.integration
+def test_matsat_utils_weighted_clause_vector_zero_weight_disables_conflict():
+    """
+    Weighted conflict: (x) AND (~x), but conflict clause has zero weight.
+    Solver should treat weighted-active set as satisfiable.
+    """
+    is_solved, satisfied = compile_and_run_matsat_utils_case(
+        program_name="test_matsat_utils_weighted_zero_disables_conflict",
+        q_rows=[[1, 0], [0, 1]],
+        n=1,
+        num_parties=3,
+        port=5032,
+        clause_weights=[1.0, 0.0],
+        weighted=True,
+    )
+    assert is_solved == 1
+    assert satisfied is not None
+    assert satisfied == pytest.approx(1.0, rel=1e-6, abs=1e-6)
+
+
+@pytest.mark.integration
+def test_matsat_utils_weighted_clause_vector_tantalizing_conflict():
+    """
+    Tantalizing weighted conflict: (x) AND (~x) with a slight weight gap.
+    The lower-weight clause should be left unsatisfied.
+    """
+    is_solved, satisfied, u_vector = compile_and_run_matsat_utils_case(
+        program_name="test_matsat_utils_weighted_tantalizing_conflict",
+        q_rows=[[1, 0], [0, 1]],
+        n=1,
+        num_parties=3,
+        port=5033,
+        clause_weights=[1.05, 1.00],
+        weighted=True,
+        return_u=True,
+    )
+    print(f"[weighted_tantalizing_conflict] u={u_vector}")
+    assert is_solved == 0
+    assert satisfied is not None
+    assert satisfied == pytest.approx(1.05, rel=1e-6, abs=1e-6)
+    if u_vector is not None:
+        assert u_vector[0] == 1
+
+    # Flip weights: now (~x) is heavier than (x), so x should be 0.
+    is_solved_flip, satisfied_flip, u_vector_flip = compile_and_run_matsat_utils_case(
+        program_name="test_matsat_utils_weighted_tantalizing_conflict_flipped",
+        q_rows=[[1, 0], [0, 1]],
+        n=1,
+        num_parties=3,
+        port=5034,
+        clause_weights=[1.00, 1.05],
+        weighted=True,
+        return_u=True,
+    )
+    print(f"[weighted_tantalizing_conflict_flipped] u={u_vector_flip}")
+    assert is_solved_flip == 0
+    assert satisfied_flip is not None
+    assert satisfied_flip == pytest.approx(1.05, rel=1e-6, abs=1e-6)
+    if u_vector_flip is not None:
+        assert (u_vector_flip[0] == 1) is False
+
+
+@pytest.mark.integration
 def test_matsat_utils_sat_uniqueish_n3():
     """
     SAT, coupled constraints (n=3), intended near-unique assignment:

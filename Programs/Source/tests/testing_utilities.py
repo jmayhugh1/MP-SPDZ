@@ -22,6 +22,7 @@ def write_matsat_utils_program(
     q_rows: list[list[int]],
     n: int,
     *,
+    clause_weights: list[float] | None = None,
     l_value: float = 2.0,
     beta_value: float = 0.5,
     max_try: int = 5,
@@ -33,7 +34,19 @@ def write_matsat_utils_program(
     Create a temporary .mpc program that invokes MatSatUtils.solve_matsat directly.
     """
     m = len(q_rows)
+    if clause_weights is not None and len(clause_weights) != m:
+        raise ValueError("clause_weights length must match number of q_rows")
     program_path = PROGRAMS_SOURCE / f"{program_name}.mpc"
+    clause_weights_setup = ""
+    clause_weights_arg = "None"
+    if clause_weights is not None:
+        clause_weights_setup = f"""clause_weight_values = {clause_weights}
+clause_weights_mat = Matrix(m, 1, sfix)
+for i in range(m):
+    clause_weights_mat[i][0] = sfix(clause_weight_values[i])
+
+"""
+        clause_weights_arg = "clause_weights_mat"
     program_source = f"""from Compiler.types import sfix, Matrix
 from Programs.Source.matsat_utils import MatSatUtils
 
@@ -46,10 +59,13 @@ for i in range(m):
     for j in range(2 * n):
         Q[i][j] = sfix(q_rows[i][j])
 
+{clause_weights_setup}
+
 u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
     Q=Q,
     n=n,
     m=m,
+    clause_weights={clause_weights_arg},
     l={l_value},
     beta=sfix({beta_value}),
     max_try={max_try},
@@ -79,7 +95,7 @@ def compile_program(program_name: str) -> None:
 
 def run_program(
     program_name: str, num_parties: int, port: int
-) -> tuple[int | None, float | None]:
+) -> tuple[int | None, float | None, list[int] | None]:
     if not SHAMIR_BIN.exists():
         pytest.skip("shamir-party.x not found; build MP-SPDZ first")
 
@@ -134,7 +150,13 @@ def run_program(
             satisfied = float(sat_match.group(1))
         else:
             satisfied = None
-        return is_solved, satisfied
+        u_matches = re.findall(r"RESULT_U\[(\d+)\]=(\d+)", out0)
+        if u_matches:
+            u_by_idx = {int(i): int(v) for i, v in u_matches}
+            u_vector = [u_by_idx[i] for i in sorted(u_by_idx.keys())]
+        else:
+            u_vector = None
+        return is_solved, satisfied, u_vector
     finally:
         for p in procs:
             if p.poll() is None:
@@ -148,17 +170,22 @@ def compile_and_run_matsat_utils_case(
     num_parties: int,
     port: int,
     *,
+    clause_weights: list[float] | None = None,
     l_value: float = 2.0,
     beta_value: float = 0.5,
     max_try: int = 5,
     max_itr: int = 20,
     print_results: bool = True,
     weighted: bool = False,
-) -> tuple[int | None, float | None]:
+    return_u: bool = False,
+) -> (
+    tuple[int | None, float | None] | tuple[int | None, float | None, list[int] | None]
+):
     program_path = write_matsat_utils_program(
         program_name=program_name,
         q_rows=q_rows,
         n=n,
+        clause_weights=clause_weights,
         l_value=l_value,
         beta_value=beta_value,
         max_try=max_try,
@@ -168,9 +195,12 @@ def compile_and_run_matsat_utils_case(
     )
     try:
         compile_program(program_name)
-        return run_program(
+        is_solved, satisfied, u_vector = run_program(
             program_name=program_name, num_parties=num_parties, port=port
         )
+        if return_u:
+            return is_solved, satisfied, u_vector
+        return is_solved, satisfied
     finally:
         if program_path.exists():
             program_path.unlink()
@@ -218,6 +248,7 @@ def compile_and_run_random_matsat_case(
     ensure_nonempty_rows: bool = True,
     num_parties: int = 3,
     port: int = 5099,
+    clause_weights: list[float] | None = None,
     l_value: float = 2.0,
     beta_value: float = 0.5,
     max_try: int = 5,
@@ -244,6 +275,7 @@ def compile_and_run_random_matsat_case(
         n=n,
         num_parties=num_parties,
         port=port,
+        clause_weights=clause_weights,
         l_value=l_value,
         beta_value=beta_value,
         max_try=max_try,

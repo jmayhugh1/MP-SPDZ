@@ -17,8 +17,8 @@ python3 /Users/joshuamayhugh/Projects/aima-python/MP-SPDZ/Programs/Source/multip
 python3 /Users/joshuamayhugh/Projects/aima-python/MP-SPDZ/Programs/Source/multiparty_matsat.py \
   --num_parties 3 --num_vars 1 --row_counts 1,1,1
 
-# Optional weighted run with explicit variable-weight vector from party 0.
-# Party 0 must append `num_vars` weight values to its stdin payload.
+# Optional weighted run with explicit per-clause weights from every party.
+# Each party must append one weight per locally provided Q row.
 python3 /Users/joshuamayhugh/Projects/aima-python/MP-SPDZ/Programs/Source/multiparty_matsat.py \
   --num_parties 3 --num_vars 2 --row_counts 1,1,1 --use_weight_vector
 
@@ -31,8 +31,8 @@ Run (each party reads its own stdin payload):
 
 Input format details:
 - All parties: provide their Q rows, each row has 2*num_vars integers.
-- Party 0 only (when --use_weight_vector): after Q rows, provide num_vars
-  additional sfix values for variable weights.
+- When --use_weight_vector is set: each party appends one sfix weight value
+  per local row, in the same local row order.
 """
 
 compiler = Compiler()
@@ -94,24 +94,27 @@ def matsat():
                 Q[row_index][j] = sint.get_input_from(i)
             row_index += 1
 
-    variable_weights = None
+    clause_weights = None
     if compiler.options.use_weight_vector:
-        variable_weights = Matrix(n, 1, sfix)
-        for i in range(n):
-            variable_weights[i][0] = sfix.get_input_from(0)
+        clause_weights = Matrix(m, 1, sfix)
+        row_index = 0
+        for i in range(num_parties):
+            for _ in range(row_counts[i]):
+                clause_weights[row_index][0] = sfix.get_input_from(i)
+                row_index += 1
 
     # Use MatSat solve from utility class
     u_tilde, u, is_solved, satisfied_clauses = MatSatUtils.solve_matsat(
         Q=Q,
         n=n,
         m=m,
-        variable_weights=variable_weights,
+        clause_weights=clause_weights,
         l=2.0,
         beta=sfix(0.5),
         max_try=5,
         max_itr=20,
         print_results=True,
-        weighted=False,
+        weighted=compiler.options.use_weight_vector,
     )
 
 

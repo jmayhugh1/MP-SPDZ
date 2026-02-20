@@ -399,7 +399,13 @@ class MatSatUtils:
                     min1_val = MatSatUtils.min1(Q_ud[i][0])
                     err.update(err + w_c[i][0] * (sfix(1) - min1_val))
                     # Keep solved-status tied to real clause violations.
-                    err_count.write(err_count.read() + (Q_ud[i][0] < sfix(1)))
+                    if weighted:
+                        err_count.write(
+                            err_count.read()
+                            + (w_c[i][0] > sfix(0)) * (Q_ud[i][0] < sfix(1))
+                        )
+                    else:
+                        err_count.write(err_count.read() + (Q_ud[i][0] < sfix(1)))
 
                 zero_err = err_count.read() == sint(0)
 
@@ -439,7 +445,9 @@ class MatSatUtils:
                     sfix(0), (mixed > sfix(1)).if_else(sfix(1), mixed)
                 )
 
-        # Calculate number of satisfied clauses only after last iteration
+        # Calculate satisfied objective only after last iteration.
+        # - unweighted: count satisfied clauses
+        # - weighted: sum clause weights of satisfied clauses
         satisfied_clauses = sfix(0)
 
         # Use the best u found across all iterations
@@ -465,7 +473,10 @@ class MatSatUtils:
         @for_range(m)
         def _(i):
             is_satisfied = MatSatUtils.min1(check_final[i][0])
-            satisfied_clauses.update(satisfied_clauses + is_satisfied)
+            if weighted:
+                satisfied_clauses.update(satisfied_clauses + w_c[i][0] * is_satisfied)
+            else:
+                satisfied_clauses.update(satisfied_clauses + is_satisfied)
 
         if print_results:
             print_ln("is_solved = %s", is_solved.reveal())

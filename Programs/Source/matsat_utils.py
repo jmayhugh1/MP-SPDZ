@@ -264,14 +264,9 @@ class MatSatUtils:
 
         # Track best solution found so far
         best_u = Matrix(n, 1, sint)
-        min_err = sfix(m + 1.0)
-        # SAT-style gating mask (0/1): clause is counted if its weight > 0.
-        active_bits = Matrix(m, 1, sint)
+        sum_w = one_m.transpose().dot(w_c)[0][0]  # sfix
+        min_err = sum_w + sfix(1)  # sfix
         err = sfix(0)
-
-        @for_range(m)
-        def _(i):
-            active_bits[i][0] = w_c[i][0] > sfix(0)
 
         # Reuse matrices across iterations to reduce MPC allocation churn.
         u_tilde_d = Matrix(2 * n, 1, sfix)
@@ -404,9 +399,7 @@ class MatSatUtils:
                     min1_val = MatSatUtils.min1(Q_ud[i][0])
                     err.update(err + w_c[i][0] * (sfix(1) - min1_val))
                     # Keep solved-status tied to real clause violations.
-                    err_count.write(
-                        err_count.read() + active_bits[i][0] * (Q_ud[i][0] < sfix(1))
-                    )
+                    err_count.write(err_count.read() + (Q_ud[i][0] < sfix(1)))
 
                 zero_err = err_count.read() == sint(0)
 

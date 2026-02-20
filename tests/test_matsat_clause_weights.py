@@ -132,17 +132,20 @@ print_ln("Test completed successfully")
         )
         time.sleep(0.5)  # Give processes time to die
 
-        # Run the MPC program with m parties (one per clause)
-        print(f"  Running {test_name} with {m} parties...")
+        # Shamir secret sharing requires at least 3 parties
+        num_parties = max(m, 3)
 
-        # Start all m parties in the background
+        # Run the MPC program with num_parties parties
+        print(f"  Running {test_name} with {num_parties} parties...")
+
+        # Start all parties in the background
         parties = []
-        for party_id in range(m):
+        for party_id in range(num_parties):
             party_process = subprocess.Popen(
                 [
                     "./shamir-party.x",
                     "-N",
-                    str(m),
+                    str(num_parties),
                     "-p",
                     str(party_id),
                     "-h",
@@ -189,20 +192,17 @@ print_ln("Test completed successfully")
         assignment = {}
 
         for line in output.split("\n"):
-            if "is_solved" in line:
-                # Extract the value after 'is_solved ='
-                parts = line.split("=")
-                if len(parts) > 1:
-                    is_solved = int(parts[-1].strip())
-            if "satisfied clauses" in line:
-                parts = line.split("=")
-                if len(parts) > 1:
-                    try:
-                        satisfied = float(parts[-1].strip())
-                    except ValueError:
-                        pass
-            if "u[" in line and "]" in line and "=" in line:
-                # Parse u[i] = val
+            # Use RESULT_ prefixed lines for authoritative final results
+            # (the solver runs multiple tries and the intermediate prints
+            # may not reflect the best solution)
+            if "RESULT_IS_SOLVED=" in line:
+                is_solved = int(line.split("=")[-1].strip())
+            elif "RESULT_SATISFIED_CLAUSES=" in line:
+                try:
+                    satisfied = float(line.split("=")[-1].strip())
+                except ValueError:
+                    pass
+            elif "RESULT_U[" in line and "=" in line:
                 try:
                     left, right = line.split("=")
                     idx = int(left.split("[")[1].split("]")[0])
@@ -241,7 +241,7 @@ class TestMatSatClauseWeights:
             description="2-party SAT: (x1) AND (x2), weights=[0.1, 0.9]",
         )
         assert is_solved == 1, "Should be SAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_2p_sat_2(self):
         """Test 2-party SAT with heavily biased weights."""
@@ -254,7 +254,7 @@ class TestMatSatClauseWeights:
             description="2-party SAT: (x1) AND (x2), weights=[0.9, 0.1]",
         )
         assert is_solved == 1, "Should be SAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_2p_unsat_1(self):
         """Test 2-party UNSAT with uniform weights."""
@@ -267,7 +267,7 @@ class TestMatSatClauseWeights:
             description="2-party UNSAT: (NOT x1) AND (NOT x2), weights=[0.1, 0.9]",
         )
         assert is_solved == 0, "Should be UNSAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_2p_unsat_2(self):
         """Test 2-party UNSAT with heavily biased weights."""
@@ -280,7 +280,7 @@ class TestMatSatClauseWeights:
             description="2-party UNSAT: (NOT x1) AND (NOT x2), weights=[0.9, 0.1]",
         )
         assert is_solved == 0, "Should be UNSAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     # ========== 3-Party Tests (3 clauses) ==========
 
@@ -295,7 +295,7 @@ class TestMatSatClauseWeights:
             description="3-party SAT: (x1) AND (x2) AND (x3), weights=[0.333, 0.333, 0.333]",
         )
         assert is_solved == 1, "Should be SAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_3party_satisfiable_descending_weights(self):
         """Test 3-party SAT with heavily biased weights."""
@@ -308,7 +308,7 @@ class TestMatSatClauseWeights:
             description="3-party SAT: (x1) AND (x2) AND (x3), weights=[0.8, 0.15, 0.05]",
         )
         assert is_solved == 1, "Should be SAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_3p_unsat_1(self):
         """Test 3-party UNSAT with uniform weights."""
@@ -321,7 +321,7 @@ class TestMatSatClauseWeights:
             description="3-party UNSAT: (x1) AND (NOT x1) AND (x2), weights=[2, 1, 10]",
         )
         assert is_solved == 0, "Should be UNSAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_3p_unsat_2(self):
         """Test 3-party UNSAT with heavily biased weights."""
@@ -334,7 +334,7 @@ class TestMatSatClauseWeights:
             description="3-party UNSAT: (x1) AND (NOT x1) AND (x2), weights=[10, 2, 1]",
         )
         assert is_solved == 0, "Should be UNSAT"
-        print(f"  ✓ Test completed: is_solved={is_solved}, satisfied={satisfied}")
+        print(f"   Test completed: is_solved={is_solved}, satisfied={satisfied}")
 
     def test_conflict_resolution(self):
         """
@@ -356,7 +356,7 @@ class TestMatSatClauseWeights:
             description="Conflict Resolution: Weights prioritize specific assignments",
         )
 
-        print(f"  ✓ Assignment received: {assignment}")
+        print(f"   Assignment received: {assignment}")
 
         # Check basic results
         assert is_solved == 0, "Should be UNSAT"
@@ -374,7 +374,7 @@ class TestMatSatClauseWeights:
             assignment[2] == 1
         ), "x2 should be 1 due to higher weight (50 vs 5) on positive clause"
 
-        print(f"  ✓ Test completed: Weighted bias confirmed.")
+        print(f"   Test completed: Weighted bias confirmed.")
 
     def test_conflict_resolution_equal_weights(self):
         """
@@ -396,7 +396,7 @@ class TestMatSatClauseWeights:
             description="Conflict Resolution: Equal weights for x1",
         )
 
-        print(f"  ✓ Assignment received: {assignment}")
+        print(f"   Assignment received: {assignment}")
 
         # Check basic results
         assert is_solved == 0, "Should be UNSAT"
@@ -414,13 +414,13 @@ class TestMatSatClauseWeights:
 
         # x1 has equal weights (1 vs 1). It should be 0 or 1.
         assert assignment[1] in [0, 1], "x1 should be a valid binary value"
-        print(f"  ✓ x1 resolved to {assignment[1]} with equal weights")
+        print(f"   x1 resolved to {assignment[1]} with equal weights")
 
         assert (
             assignment[2] == 1
         ), "x2 should be 1 due to higher weight (50 vs 5) on positive clause"
 
-        print(f"  ✓ Test completed: Weighted bias confirmed.")
+        print(f"   Test completed: Weighted bias confirmed.")
 
     def test_conflict_resolution_stats(self):
         """
@@ -640,7 +640,7 @@ print_ln("Test completed successfully")
         assert (
             assignment[0] == 0 and assignment[1] == 0
         ), f"Scenario 1 failed: Expected x1=0, x2=0, got {assignment}"
-        print("  ✓ Scenario 1 passed: Minimized violations count.")
+        print("   Scenario 1 passed: Minimized violations count.")
 
         # Scenario 2: Clause 1 weight = 10
         # x1=0, x2=0 violates clause 1 (cost 10).
@@ -665,7 +665,7 @@ print_ln("Test completed successfully")
         assert (
             valid_others
         ), f"Scenario 2 failed: Expected (0,1) or (1,0), got {assignment}"
-        print("  ✓ Scenario 2 passed: Avoided expensive clause 1.")
+        print("   Scenario 2 passed: Avoided expensive clause 1.")
 
         # Scenario 3: Clause 1 weight = 1.5
         # x1=0, x2=0 violates clause 1 (cost 1.5).
@@ -684,5 +684,5 @@ print_ln("Test completed successfully")
             assignment[0] == 0 and assignment[1] == 0
         ), f"Scenario 3 failed: Expected x1=0, x2=0, got {assignment}"
         print(
-            "  ✓ Scenario 3 passed: Correctly prioritized sum of weights (1.5 < 2.0)."
+            "   Scenario 3 passed: Correctly prioritized sum of weights (1.5 < 2.0)."
         )

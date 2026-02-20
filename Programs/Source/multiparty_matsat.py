@@ -48,6 +48,10 @@ compiler.parser.add_option(
 @compiler.register_function("matsat")
 def matsat():
     compiler.parse_args()
+    # Double fixed-point precision from defaults:
+    # - fractional bits: 16 -> 32
+    # - total fixed-point bits: 31 -> 62
+    sfix.set_precision(32, 62)
 
     if not compiler.options.num_parties:
         print("Error: --num_parties is required")
@@ -112,8 +116,9 @@ def matsat():
         l=2.0,
         beta=sfix(0.5),
         max_try=5,
-        max_itr=20,
+        max_itr=100,
         print_results=True,
+        stats=True,
         weighted=compiler.options.use_weight_vector,
     )
 

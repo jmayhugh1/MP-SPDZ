@@ -155,6 +155,7 @@ class MatSatUtils:
         max_try: int = 5,
         max_itr: int = 40,
         print_results: bool = False,
+        stats: bool = False,
         weighted: bool = False,
     ) -> Tuple[Matrix, Matrix, sint, sfix]:
         """
@@ -289,6 +290,7 @@ class MatSatUtils:
             # Inner iteration loop
             @for_range(max_itr)
             def __(iter_idx):
+                print_ln("iter_idx = %s", iter_idx)
                 nonlocal is_solved, err, min_err
                 err.update(0)
 
@@ -329,7 +331,7 @@ class MatSatUtils:
                     )
 
                 jsat = jsat_first_term[0][0] + jsat_reg_term
-
+                print_ln("jsat = %s", jsat.reveal())
                 # Jacobian calculation
 
                 # Compute bin_Qud = 1{ Q·u_d < 1 } as secret bits, then cast to sfix.
@@ -365,14 +367,15 @@ class MatSatUtils:
                 jsatacb = jsatacb_first_term + jsatacb_reg_term
                 grad_sq = MatSatUtils.squared_l2_norm(jsatacb)
 
-                epsilon = sfix(1e-8)
+                epsilon = sfix(1e-3)
                 # Keep denominator as squared gradient norm (paper-consistent scaling).
                 alpha = jsat / (grad_sq + epsilon)
                 # Keep gradient updates numerically stable in fixed-point.
-                alpha_cap = sfix(1000)
-                alpha = (alpha > alpha_cap).if_else(
-                    alpha_cap, (alpha < -alpha_cap).if_else(-alpha_cap, alpha)
-                )
+                if stats:
+                    print_ln("jsat = %s", jsat.reveal())
+                    print_ln("grad_sq = %s", grad_sq.reveal())
+                    print_ln("epsilon = %s", epsilon.reveal())
+                    print_ln("uncapped alpha = %s", alpha.reveal())
 
                 @for_range(n)
                 def ___(i):

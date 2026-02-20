@@ -35,7 +35,7 @@ def test_matsat_utils_sat_example():
     SAT: (x) AND (x) AND (x), with n=1.
     Q rows use [x, ~x] literal layout.
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_sat_1var",
         q_rows=[[1, 0], [1, 0], [1, 0]],
         n=1,
@@ -43,17 +43,17 @@ def test_matsat_utils_sat_example():
         port=5021,
     )
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied >= 3.0
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
 def test_matsat_utils_unsat_example():
     """
     UNSAT: (x) AND (~x) AND (x), with n=1.
-    At most 2 clauses can be satisfied simultaneously.
+    At least one clause must remain unsatisfied.
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_unsat_1var",
         q_rows=[[1, 0], [0, 1], [1, 0]],
         n=1,
@@ -61,8 +61,8 @@ def test_matsat_utils_unsat_example():
         port=5022,
     )
     assert is_solved == 0
-    if satisfied is not None:
-        assert satisfied <= 2.0
+    if unsatisfied is not None:
+        assert unsatisfied >= 1.0
 
 
 @pytest.mark.integration
@@ -71,7 +71,7 @@ def test_matsat_utils_sat_two_var_example():
     SAT over n=2:
       (x1) AND (x2) AND (x1)
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_sat_2var",
         q_rows=[
             [1, 0, 0, 0],  # x1
@@ -83,8 +83,8 @@ def test_matsat_utils_sat_two_var_example():
         port=5023,
     )
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied >= 3.0
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
@@ -92,9 +92,9 @@ def test_matsat_utils_unsat_two_var_conflict_example():
     """
     UNSAT over n=2:
       (x1) AND (~x1) AND (x2) AND (~x2)
-    At most two clauses can be satisfied simultaneously.
+    At least two clauses must remain unsatisfied.
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_unsat_2var_conflict",
         q_rows=[
             [1, 0, 0, 0],  # x1
@@ -107,8 +107,8 @@ def test_matsat_utils_unsat_two_var_conflict_example():
         port=5024,
     )
     assert is_solved == 0
-    if satisfied is not None:
-        assert satisfied <= 2.0
+    if unsatisfied is not None:
+        assert unsatisfied >= 2.0
 
 
 @pytest.mark.integration
@@ -116,7 +116,7 @@ def test_matsat_utils_sat_example_custom_solver_params():
     """
     SAT case with custom solve_matsat() parameters to ensure test harness knobs work.
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_sat_custom_params",
         q_rows=[[1, 0], [1, 0], [1, 0]],
         n=1,
@@ -130,17 +130,16 @@ def test_matsat_utils_sat_example_custom_solver_params():
         weighted=False,
     )
     assert is_solved == 1
-    assert satisfied is not None
+    assert unsatisfied is not None
 
 
 @pytest.mark.integration
 def test_matsat_utils_weighted_clause_vector_sat_sum():
     """
-    Weighted SAT: all clauses are satisfiable, so weighted satisfied total should
-    match the sum of clause weights.
+    Weighted SAT: all active clauses are satisfiable, so unsatisfied count is zero.
     """
     clause_weights = [2.5, 7.0, 0.5]
-    is_solved, satisfied, u_vector = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied, u_vector = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_weighted_sat_sum",
         q_rows=[[1, 0], [1, 0], [1, 0]],
         n=1,
@@ -152,8 +151,8 @@ def test_matsat_utils_weighted_clause_vector_sat_sum():
     )
     print(f"[weighted_sat_sum] u={u_vector}")
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied == pytest.approx(sum(clause_weights), rel=1e-6, abs=1e-6)
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
@@ -162,7 +161,7 @@ def test_matsat_utils_weighted_clause_vector_zero_weight_disables_conflict():
     Weighted conflict: (x) AND (~x), but conflict clause has zero weight.
     Solver should treat weighted-active set as satisfiable.
     """
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_weighted_zero_disables_conflict",
         q_rows=[[1, 0], [0, 1]],
         n=1,
@@ -172,8 +171,8 @@ def test_matsat_utils_weighted_clause_vector_zero_weight_disables_conflict():
         weighted=True,
     )
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied == pytest.approx(1.0, rel=1e-6, abs=1e-6)
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
@@ -182,7 +181,7 @@ def test_matsat_utils_weighted_clause_vector_tantalizing_conflict():
     Tantalizing weighted conflict: (x) AND (~x) with a slight weight gap.
     The lower-weight clause should be left unsatisfied.
     """
-    is_solved, satisfied, u_vector = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied, u_vector = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_weighted_tantalizing_conflict",
         q_rows=[[1, 0], [0, 1]],
         n=1,
@@ -194,13 +193,13 @@ def test_matsat_utils_weighted_clause_vector_tantalizing_conflict():
     )
     print(f"[weighted_tantalizing_conflict] u={u_vector}")
     assert is_solved == 0
-    assert satisfied is not None
-    assert satisfied == pytest.approx(1.05, rel=1e-6, abs=1e-6)
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(1.0, rel=1e-6, abs=1e-6)
     if u_vector is not None:
         assert u_vector[0] == 1
 
     # Flip weights: now (~x) is heavier than (x), so x should be 0.
-    is_solved_flip, satisfied_flip, u_vector_flip = compile_and_run_matsat_utils_case(
+    is_solved_flip, unsatisfied_flip, u_vector_flip = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_weighted_tantalizing_conflict_flipped",
         q_rows=[[1, 0], [0, 1]],
         n=1,
@@ -212,8 +211,8 @@ def test_matsat_utils_weighted_clause_vector_tantalizing_conflict():
     )
     print(f"[weighted_tantalizing_conflict_flipped] u={u_vector_flip}")
     assert is_solved_flip == 0
-    assert satisfied_flip is not None
-    assert satisfied_flip == pytest.approx(1.05, rel=1e-6, abs=1e-6)
+    assert unsatisfied_flip is not None
+    assert unsatisfied_flip == pytest.approx(1.0, rel=1e-6, abs=1e-6)
     if u_vector_flip is not None:
         assert (u_vector_flip[0] == 1) is False
 
@@ -232,7 +231,7 @@ def test_matsat_utils_sat_uniqueish_n3():
         [0, 1, 0, 1, 0, 0],  # (¬x0 ∨ x1)
         [0, 0, 1, 0, 1, 0],  # (¬x1 ∨ x2)
     ]
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_sat_uniqueish_n3",
         q_rows=q_rows,
         n=3,
@@ -240,8 +239,8 @@ def test_matsat_utils_sat_uniqueish_n3():
         port=5026,
     )
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied >= float(len(q_rows))
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
@@ -257,7 +256,7 @@ def test_matsat_utils_unsat_equiv_chain_xor_n3():
         [1, 0, 1, 0, 0, 0],  # x0 ∨ x2
         [0, 0, 0, 1, 0, 1],  # ¬x0 ∨ ¬x2
     ]
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_unsat_equiv_chain_xor_n3",
         q_rows=q_rows,
         n=3,
@@ -265,8 +264,8 @@ def test_matsat_utils_unsat_equiv_chain_xor_n3():
         port=5027,
     )
     assert is_solved == 0
-    if satisfied is not None:
-        assert satisfied < float(len(q_rows))
+    if unsatisfied is not None:
+        assert unsatisfied > 0.0
 
 
 @pytest.mark.integration
@@ -285,7 +284,7 @@ def test_matsat_utils_unsat_php_3_into_2_n6():
         [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],  # ¬p0h1 ∨ ¬p2h1
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1],  # ¬p1h1 ∨ ¬p2h1
     ]
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_unsat_php_3_into_2_n6",
         q_rows=q_rows,
         n=6,
@@ -293,8 +292,8 @@ def test_matsat_utils_unsat_php_3_into_2_n6():
         port=5028,
     )
     assert is_solved == 0
-    if satisfied is not None:
-        assert satisfied < float(len(q_rows))
+    if unsatisfied is not None:
+        assert unsatisfied > 0.0
 
 
 @pytest.mark.integration
@@ -309,7 +308,7 @@ def test_matsat_utils_sat_implication_cycle_pin_n4():
         [1, 0, 0, 0, 0, 0, 0, 1],  # ¬x3 ∨ x0
         [1, 0, 0, 0, 0, 0, 0, 0],  # x0
     ]
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_sat_implication_cycle_pin_n4",
         q_rows=q_rows,
         n=4,
@@ -317,8 +316,8 @@ def test_matsat_utils_sat_implication_cycle_pin_n4():
         port=5029,
     )
     assert is_solved == 1
-    assert satisfied is not None
-    assert satisfied >= float(len(q_rows))
+    assert unsatisfied is not None
+    assert unsatisfied == pytest.approx(0.0, rel=1e-6, abs=1e-6)
 
 
 @pytest.mark.integration
@@ -338,7 +337,7 @@ def test_matsat_utils_unsat_competing_cardinality_n4():
         [0, 0, 1, 1, 0, 0, 0, 0],  # x2∨x3
         [1, 0, 1, 0, 0, 0, 0, 0],  # x0∨x2
     ]
-    is_solved, satisfied = compile_and_run_matsat_utils_case(
+    is_solved, unsatisfied = compile_and_run_matsat_utils_case(
         program_name="test_matsat_utils_unsat_competing_cardinality_n4",
         q_rows=q_rows,
         n=4,
@@ -346,5 +345,5 @@ def test_matsat_utils_unsat_competing_cardinality_n4():
         port=5030,
     )
     assert is_solved == 0
-    if satisfied is not None:
-        assert satisfied < float(len(q_rows))
+    if unsatisfied is not None:
+        assert unsatisfied > 0.0

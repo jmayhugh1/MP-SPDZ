@@ -445,9 +445,10 @@ class MatSatUtils:
                     sfix(0), (mixed > sfix(1)).if_else(sfix(1), mixed)
                 )
 
-        # Calculate satisfied objective only after last iteration.
-        # - unweighted: count satisfied clauses
-        # - weighted: sum clause weights of satisfied clauses
+        # Calculate clause error metric only after last iteration.
+        # - unweighted: count unsatisfied clauses
+        # - weighted: count unsatisfied active clauses (weight > 0)
+        # Keep legacy variable/output naming for parser compatibility.
         satisfied_clauses = sfix(0)
 
         # Use the best u found across all iterations
@@ -474,9 +475,11 @@ class MatSatUtils:
         def _(i):
             is_satisfied = MatSatUtils.min1(check_final[i][0])
             if weighted:
-                satisfied_clauses.update(satisfied_clauses + w_c[i][0] * is_satisfied)
+                satisfied_clauses.update(
+                    satisfied_clauses + (w_c[i][0] > sfix(0)) * (sfix(1) - is_satisfied)
+                )
             else:
-                satisfied_clauses.update(satisfied_clauses + is_satisfied)
+                satisfied_clauses.update(satisfied_clauses + (sfix(1) - is_satisfied))
 
         if print_results:
             print_ln("is_solved = %s", is_solved.reveal())

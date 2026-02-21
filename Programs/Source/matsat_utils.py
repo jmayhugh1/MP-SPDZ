@@ -281,11 +281,14 @@ class MatSatUtils:
         @for_range(max_try)
         def _(try_idx):
             nonlocal is_solved
+            if stats:
+                print_ln("[stats] try_idx = %s", try_idx)
 
             # Inner iteration loop
             @for_range(max_itr)
             def __(iter_idx):
-                print_ln("iter_idx = %s", iter_idx)
+                if stats:
+                    print_ln("[stats] iter_idx = %s", iter_idx)
                 nonlocal is_solved, err, min_err
                 err.update(0)
 
@@ -326,7 +329,6 @@ class MatSatUtils:
                     )
 
                 jsat = jsat_first_term[0][0] + jsat_reg_term
-                print_ln("jsat = %s", jsat.reveal())
                 # Jacobian calculation
 
                 # Compute bin_Qud = 1{ Q·u_d < 1 } as secret bits, then cast to sfix.
@@ -367,10 +369,10 @@ class MatSatUtils:
                 alpha = jsat / (grad_sq + epsilon)
                 # Keep gradient updates numerically stable in fixed-point.
                 if stats:
-                    print_ln("jsat = %s", jsat.reveal())
-                    print_ln("grad_sq = %s", grad_sq.reveal())
-                    print_ln("epsilon = %s", epsilon.reveal())
-                    print_ln("uncapped alpha = %s", alpha.reveal())
+                    print_ln("[stats] jsat = %s", jsat.reveal())
+                    print_ln("[stats] grad_sq = %s", grad_sq.reveal())
+                    print_ln("[stats] epsilon = %s", epsilon.reveal())
+                    print_ln("[stats] uncapped alpha = %s", alpha.reveal())
 
                 @for_range(n)
                 def ___(i):
@@ -408,6 +410,9 @@ class MatSatUtils:
                         err_count.write(err_count.read() + (Q_ud[i][0] < sfix(1)))
 
                 zero_err = err_count.read() == sint(0)
+                if stats:
+                    print_ln("[stats] err = %s", err.reveal())
+                    print_ln("[stats] unsat_clauses = %s", err_count.read().reveal())
 
                 # Update best solution if current error is lower than min_err
                 update_best = err < min_err

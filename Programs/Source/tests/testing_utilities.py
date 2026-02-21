@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+import csv
+import inspect
 import os
 import random
 import re
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
+
+
+def _detect_test_name() -> str | None:
+    """Walk call stack to find the first function starting with 'test_'."""
+    for frame_info in inspect.stack():
+        if frame_info.function.startswith("test_"):
+            return frame_info.function
+    return None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -15,6 +26,220 @@ MP_SPDZ_ROOT = REPO_ROOT / "MP-SPDZ"
 PROGRAMS_SOURCE = MP_SPDZ_ROOT / "Programs" / "Source"
 SHAMIR_BIN = MP_SPDZ_ROOT / "shamir-party.x"
 MP_SPDZ_ENV = {**os.environ, "PYTHONPATH": str(MP_SPDZ_ROOT)}
+TRACE_ARTIFACTS_ROOT = PROGRAMS_SOURCE / "tests" / "artifacts"
+TRACE_CSV_DIR = TRACE_ARTIFACTS_ROOT / "csv"
+TRACE_GRAPHS_DIR = TRACE_ARTIFACTS_ROOT / "graphs"
+
+
+def _parse_solver_trace(output: str) -> list[dict[str, float | int]]:
+    """
+    Parse MatSat iteration trace from party output.
+
+    Returns one row per iteration with fields:
+      - try_idx
+      - iter_idx
+      - jsat
+      - grad_sq
+      - epsilon
+      - alpha
+      - err
+      - unsat_clauses
+    """
+    try_re = re.compile(r"try_idx\s*=\s*(\d+)")
+    iter_re = re.compile(r"iter_idx\s*=\s*(\d+)")
+    jsat_re = re.compile(r"jsat\s*=\s*([-+]?\d+(?:\.\d+)?)")
+    grad_re = re.compile(r"grad_sq\s*=\s*([-+]?\d+(?:\.\d+)?)")
+    eps_re = re.compile(r"epsilon\s*=\s*([-+]?\d+(?:\.\d+)?)")
+    alpha_re = re.compile(r"uncapped alpha\s*=\s*([-+]?\d+(?:\.\d+)?)")
+    err_re = re.compile(r"err\s*=\s*([-+]?\d+(?:\.\d+)?)")
+    unsat_re = re.compile(r"unsat_clauses\s*=\s*(\d+)")
+
+    rows: list[dict[str, float | int]] = []
+    current_try = -1
+    saw_explicit_try = False
+    last_iter: int | None = None
+    current_row: dict[str, float | int] | None = None
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        m_try = try_re.search(line)
+        if m_try:
+            current_try = int(m_try.group(1))
+            saw_explicit_try = True
+            last_iter = None
+            continue
+        m_iter = iter_re.search(line)
+        if m_iter:
+            iter_idx = int(m_iter.group(1))
+            if not saw_explicit_try:
+                if last_iter is None or iter_idx <= last_iter:
+                    current_try += 1
+            elif last_iter is not None and iter_idx <= last_iter:
+                # Fallback in case logs ever stop printing explicit try_idx.
+                current_try += 1
+            last_iter = iter_idx
+            current_row = {"try_idx": current_try, "iter_idx": iter_idx}
+            rows.append(current_row)
+            continue
+
+        if current_row is None:
+            continue
+
+        m_jsat = jsat_re.search(line)
+        if m_jsat:
+            # jsat can appear twice per iteration; keep the first parsed value.
+            current_row.setdefault("jsat", float(m_jsat.group(1)))
+            continue
+
+        m_grad = grad_re.search(line)
+        if m_grad:
+            current_row["grad_sq"] = float(m_grad.group(1))
+            continue
+
+        m_eps = eps_re.search(line)
+        if m_eps:
+            current_row["epsilon"] = float(m_eps.group(1))
+            continue
+
+        m_alpha = alpha_re.search(line)
+        if m_alpha:
+            current_row["alpha"] = float(m_alpha.group(1))
+            continue
+
+        m_err = err_re.search(line)
+        if m_err:
+            current_row["err"] = float(m_err.group(1))
+            continue
+
+        m_unsat = unsat_re.search(line)
+        if m_unsat:
+            current_row["unsat_clauses"] = int(m_unsat.group(1))
+            continue
+
+    return rows
+
+
+def _write_trace_csv(
+    program_name: str, rows: list[dict[str, float | int]], test_name: str | None = None
+) -> Path:
+    TRACE_CSV_DIR.mkdir(parents=True, exist_ok=True)
+    folder_name = (
+        test_name if test_name else datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    )
+    csv_path = TRACE_CSV_DIR / f"{program_name}_{folder_name}.csv"
+    fieldnames = [
+        "try_idx",
+        "iter_idx",
+        "jsat",
+        "grad_sq",
+        "epsilon",
+        "alpha",
+        "err",
+        "unsat_clauses",
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+    return csv_path
+
+
+def _plot_trace_by_try(
+    csv_path: Path, program_name: str, test_name: str | None = None
+) -> list[Path]:
+    """
+    Read a trace CSV and save one graph per try.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        # Keep tests runnable even if matplotlib isn't installed.
+        return []
+
+    rows_by_try: dict[int, list[dict[str, float | int]]] = {}
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            try_idx = int(row["try_idx"])
+            rows_by_try.setdefault(try_idx, []).append(
+                {
+                    "iter_idx": int(row["iter_idx"]),
+                    "jsat": float(row["jsat"]) if row["jsat"] else None,
+                    "grad_sq": float(row["grad_sq"]) if row["grad_sq"] else None,
+                    "alpha": float(row["alpha"]) if row["alpha"] else None,
+                    "err": float(row["err"]) if row.get("err") else None,
+                    "unsat_clauses": (
+                        float(row["unsat_clauses"])
+                        if row.get("unsat_clauses")
+                        else None
+                    ),
+                }
+            )
+
+    folder_name = (
+        test_name if test_name else csv_path.stem.replace(f"{program_name}_", "")
+    )
+    out_dir = TRACE_GRAPHS_DIR / program_name / folder_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+
+    for try_idx, rows in rows_by_try.items():
+        rows = sorted(rows, key=lambda r: int(r["iter_idx"]))
+        x = [int(r["iter_idx"]) for r in rows]
+        jsat = [r["jsat"] for r in rows]
+        grad = [r["grad_sq"] for r in rows]
+        alpha = [r["alpha"] for r in rows]
+        err = [r["err"] for r in rows]
+        unsat = [r["unsat_clauses"] for r in rows]
+
+        fig, axes = plt.subplots(5, 1, figsize=(9, 13), sharex=True)
+        axes[0].plot(x, jsat, marker="o", markersize=2, linewidth=1)
+        axes[0].set_ylabel("jsat")
+        axes[0].grid(True, alpha=0.3)
+
+        axes[1].plot(x, grad, marker="o", markersize=2, linewidth=1)
+        axes[1].set_ylabel("grad_sq")
+        axes[1].grid(True, alpha=0.3)
+
+        axes[2].plot(x, alpha, marker="o", markersize=2, linewidth=1)
+        axes[2].set_ylabel("uncapped alpha")
+        axes[2].grid(True, alpha=0.3)
+
+        axes[3].plot(x, err, marker="o", markersize=2, linewidth=1)
+        axes[3].set_ylabel("err")
+        axes[3].grid(True, alpha=0.3)
+
+        axes[4].plot(x, unsat, marker="o", markersize=2, linewidth=1)
+        axes[4].set_xlabel("iteration")
+        axes[4].set_ylabel("unsat_clauses")
+        axes[4].grid(True, alpha=0.3)
+
+        fig.suptitle(f"{program_name} - try {try_idx}")
+        fig.tight_layout()
+        out_path = out_dir / f"try_{try_idx}.png"
+        fig.savefig(out_path, dpi=140)
+        plt.close(fig)
+        saved.append(out_path)
+
+    return saved
+
+
+def write_trace_artifacts(
+    program_name: str, output: str, test_name: str | None = None
+) -> tuple[Path | None, list[Path]]:
+    """
+    Parse run output and emit CSV + per-try plots.
+
+    If test_name is provided, artifacts are organized under that name;
+    otherwise a timestamp-based folder is used.
+    """
+    rows = _parse_solver_trace(output)
+    if not rows:
+        return None, []
+    csv_path = _write_trace_csv(program_name, rows, test_name=test_name)
+    graph_paths = _plot_trace_by_try(csv_path, program_name, test_name=test_name)
+    return csv_path, graph_paths
 
 
 def write_matsat_utils_program(
@@ -94,7 +319,7 @@ def compile_program(program_name: str) -> None:
 
 
 def run_program(
-    program_name: str, num_parties: int, port: int
+    program_name: str, num_parties: int, port: int, *, test_name: str | None = None
 ) -> tuple[int | None, float | None, list[int] | None]:
     if not SHAMIR_BIN.exists():
         pytest.skip("shamir-party.x not found; build MP-SPDZ first")
@@ -141,6 +366,14 @@ def run_program(
                 raise RuntimeError(f"Party failed ({p.returncode}): {err}")
 
         out0 = outs[0]
+        csv_path, graph_paths = write_trace_artifacts(
+            program_name, out0, test_name=test_name
+        )
+        if csv_path is not None:
+            print(f"trace csv: {csv_path}")
+        for graph_path in graph_paths:
+            print(f"trace graph: {graph_path}")
+
         solved_match = re.search(r"RESULT_IS_SOLVED=(\d+)", out0)
         sat_match = re.search(
             r"RESULT_SATISFIED_CLAUSES=([-+]?\d+(?:\.\d+)?|NaN)", out0
@@ -178,9 +411,14 @@ def compile_and_run_matsat_utils_case(
     print_results: bool = True,
     weighted: bool = False,
     return_u: bool = False,
+    test_name: str | None = None,
 ) -> (
     tuple[int | None, float | None] | tuple[int | None, float | None, list[int] | None]
 ):
+    # Auto-detect test name from call stack if not provided
+    if test_name is None:
+        test_name = _detect_test_name()
+
     program_path = write_matsat_utils_program(
         program_name=program_name,
         q_rows=q_rows,
@@ -196,7 +434,10 @@ def compile_and_run_matsat_utils_case(
     try:
         compile_program(program_name)
         is_solved, satisfied, u_vector = run_program(
-            program_name=program_name, num_parties=num_parties, port=port
+            program_name=program_name,
+            num_parties=num_parties,
+            port=port,
+            test_name=test_name,
         )
         if return_u:
             return is_solved, satisfied, u_vector

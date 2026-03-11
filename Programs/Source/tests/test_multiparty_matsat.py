@@ -187,7 +187,7 @@ def test_matsat_utils_weighted_clause_vector_tantalizing_conflict():
         n=1,
         num_parties=3,
         port=5033,
-        clause_weights=[1.05, 1.00],
+        clause_weights=[1.5, 1.00],
         weighted=True,
         return_u=True,
     )

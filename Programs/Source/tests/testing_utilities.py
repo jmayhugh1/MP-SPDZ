@@ -375,17 +375,20 @@ def run_program(
             print(f"trace graph: {graph_path}")
 
         solved_match = re.search(r"RESULT_IS_SOLVED=(\d+)", out0)
+        # Handle scientific notation (e.g., 1.0e-10), regular floats, integers, and NaN/inf
         sat_match = re.search(
-            r"RESULT_SATISFIED_CLAUSES=([-+]?\d+(?:\.\d+)?|NaN)", out0
+            r"RESULT_SATISFIED_CLAUSES=([-+]?(?:\d+\.?\d*|\d*\.?\d+)(?:[eE][-+]?\d+)?|NaN|inf|-inf)",
+            out0,
         )
         is_solved = int(solved_match.group(1)) if solved_match else None
-        if sat_match and sat_match.group(1) != "NaN":
+        if sat_match and sat_match.group(1) not in ("NaN", "inf", "-inf"):
             satisfied = float(sat_match.group(1))
         else:
             satisfied = None
-        u_matches = re.findall(r"RESULT_U\[(\d+)\]=(\d+)", out0)
+        # RESULT_U values are binary (0 or 1), but may be printed as floats
+        u_matches = re.findall(r"RESULT_U\[(\d+)\]=([-+]?\d+\.?\d*)", out0)
         if u_matches:
-            u_by_idx = {int(i): int(v) for i, v in u_matches}
+            u_by_idx = {int(i): int(round(float(v))) for i, v in u_matches}
             u_vector = [u_by_idx[i] for i in sorted(u_by_idx.keys())]
         else:
             u_vector = None

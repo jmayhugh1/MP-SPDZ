@@ -157,6 +157,8 @@ class MatSatUtils:
         print_results: bool = False,
         stats: bool = False,
         weighted: bool = False,
+        stagnation_threshold: int = 25,
+        kick_noise_std: float = 0.1,
     ) -> Tuple[Matrix, Matrix, sint, sfix]:
         """
         MatSat solve algorithm.
@@ -176,6 +178,10 @@ class MatSatUtils:
             max_itr: Maximum number of iterations per try.
             print_results: Whether to print results.
             weighted: Whether to run the unweighted/weighted version of MatSat
+            stagnation_threshold: Number of iterations without improvement before
+                   applying escape kick (default 50).
+            kick_noise_std: Standard deviation of noise added during escape kick
+                   (default 0.1). Values are clamped to [0,1] after noise.
 
         Returns:
             Tuple of (u_tilde, u, is_solved) where:
@@ -268,6 +274,12 @@ class MatSatUtils:
         min_err = sum_w + sfix(1)  # sfix
         err = sfix(0)
 
+        # Stagnation detection: track iterations since last improvement
+        # Use MemValue for mutable counters inside loops
+        iters_since_improvement = MemValue(sint(0))
+        last_best_err = MemValue(sfix(sum_w + sfix(1)))
+        improvement_threshold = sfix(0.1)  # Minimum improvement to reset counter
+
         # Reuse matrices across iterations to reduce MPC allocation churn.
         u_tilde_d = Matrix(2 * n, 1, sfix)
         min1_Q_utilde_d = Matrix(m, 1, sfix)
@@ -275,6 +287,7 @@ class MatSatUtils:
         new_u_tilde = Matrix(n, 1, sfix)
         new_u = Matrix(n, 1, sint)
         u_d = Matrix(2 * n, 1, sfix)
+        delta = Matrix(n, 1, sfix)  # For perturbation between tries
 
         # -- Main optimization loop --
         # Outer try loop
@@ -292,9 +305,7 @@ class MatSatUtils:
                 nonlocal is_solved, err, min_err
                 err.update(0)
 
-                # Dual vector u_d = [u; 1-u]
-                u_tilde_d = Matrix(2 * n, 1, sfix)
-
+                # Build dual vector u_tilde_d = [u_tilde; 1-u_tilde] (reuse preallocated buffer)
                 @for_range(n)
                 def ___(i):
                     u_tilde_d[i][0] = u_tilde[i][0]
@@ -364,7 +375,7 @@ class MatSatUtils:
                 jsatacb = jsatacb_first_term + jsatacb_reg_term
                 grad_sq = MatSatUtils.squared_l2_norm(jsatacb)
 
-                epsilon = sfix(1e-3)
+                epsilon = sfix(1e-2)
                 # Keep denominator as squared gradient norm (paper-consistent scaling).
                 alpha = jsat / (grad_sq + epsilon)
                 # Keep gradient updates numerically stable in fixed-point.
@@ -422,6 +433,45 @@ class MatSatUtils:
                 def ___(i):
                     best_u[i][0] = update_best.if_else(new_u[i][0], best_u[i][0])
 
+                # Stagnation detection: check if we've improved significantly
+                improved = (last_best_err.read() - err) > improvement_threshold
+                # Reset counter if improved, otherwise increment
+                iters_since_improvement.write(
+                    improved.if_else(sint(0), iters_since_improvement.read() + sint(1))
+                )
+                # Update last best if we improved
+                last_best_err.write(improved.if_else(err, last_best_err.read()))
+
+                # Escape kick: if stagnated for too long, add noise to break limit cycle
+                stagnated = iters_since_improvement.read() >= sint(stagnation_threshold)
+                # Only apply kick if not solved
+                apply_kick = stagnated * (sint(1) - is_solved)
+
+                if stats:
+                    print_ln(
+                        "[stats] iters_since_improvement = %s",
+                        iters_since_improvement.read().reveal(),
+                    )
+
+                @for_range(n)
+                def ___(i):
+                    # Generate random noise in [-kick_noise_std, +kick_noise_std]
+                    noise = (sfix.get_random(0, 1) - sfix(0.5)) * sfix(2 * kick_noise_std)
+                    kicked_val = new_u_tilde[i][0] + sfix(apply_kick) * noise
+                    # Clamp to [0, 1]
+                    kicked_val = (kicked_val < sfix(0)).if_else(
+                        sfix(0), (kicked_val > sfix(1)).if_else(sfix(1), kicked_val)
+                    )
+                    new_u_tilde[i][0] = kicked_val
+
+                # Reset stagnation counter after kick
+                iters_since_improvement.write(
+                    apply_kick.if_else(sint(0), iters_since_improvement.read())
+                )
+
+                if stats:
+                    print_ln("[stats] applied_kick = %s", apply_kick.reveal())
+
                 # Freeze if solved
                 @for_range(n)
                 def ___(i):
@@ -434,9 +484,8 @@ class MatSatUtils:
 
                 is_solved.update(is_solved + zero_err - is_solved * zero_err)
 
-            # Perturb if not solved
+            # Perturb if not solved (reuse preallocated delta buffer)
             mask = sfix(1) - sfix(is_solved)
-            delta = Matrix(n, 1, sfix)
 
             @for_range(n)
             def _(i):

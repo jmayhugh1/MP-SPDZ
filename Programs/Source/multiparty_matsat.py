@@ -43,6 +43,21 @@ compiler.parser.add_option("--row_counts", dest="row_counts", type=str, default=
 compiler.parser.add_option(
     "--use_weight_vector", dest="use_weight_vector", action="store_true", default=False
 )
+# Stagnation escape kick parameters
+compiler.parser.add_option(
+    "--stagnation_threshold",
+    dest="stagnation_threshold",
+    type=int,
+    default=20,
+    help="Iterations without improvement before escape kick (default 25)",
+)
+compiler.parser.add_option(
+    "--kick_noise_std",
+    dest="kick_noise_std",
+    type=float,
+    default=0.3,
+    help="Noise std for escape kick (default 0.1)",
+)
 
 
 @compiler.register_function("matsat")
@@ -113,13 +128,15 @@ def matsat():
         n=n,
         m=m,
         clause_weights=clause_weights,
-        l=2.0,
-        beta=sfix(0.5),
-        max_try=5,
-        max_itr=100,
+        l=1,
+        beta=sfix(0.7),
+        max_try=10,
+        max_itr=300,
         print_results=True,
         stats=True,
         weighted=compiler.options.use_weight_vector,
+        stagnation_threshold=compiler.options.stagnation_threshold,
+        kick_noise_std=compiler.options.kick_noise_std,
     )
 
 

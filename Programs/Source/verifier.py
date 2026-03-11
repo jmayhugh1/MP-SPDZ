@@ -39,11 +39,14 @@ compiler.parser.add_option("--iteration_no", dest="iteration_no", type=int, defa
 compiler.parser.add_option(
     "--is_graph", dest="is_graph", action="store_true", default=False
 )
+compiler.parser.add_option(
+    "--print_beliefs", dest="print_beliefs", action="store_true", default=False
+)
 
 
 @compiler.register_function("verifier")
 def verifier():
-    def get_arg_info() -> Tuple[int, int, int, int, bool]:
+    def get_arg_info() -> Tuple[int, int, int, int, bool, bool]:
         compiler.parse_args()
         if not compiler.options.num_parties:
             print("Error: num_parties argument is required")
@@ -60,9 +63,12 @@ def verifier():
             compiler.options.query_size,
             compiler.options.iteration_no or 0,
             compiler.options.is_graph,
+            compiler.options.print_beliefs,
         )
 
-    num_parties, grid_size, query_size, iteration_no, is_graph = get_arg_info()
+    num_parties, grid_size, query_size, iteration_no, is_graph, print_beliefs = (
+        get_arg_info()
+    )
 
     def get_path_from_bob(hazard_matrix: Matrix, bob_id: int) -> None:
         """
@@ -125,6 +131,19 @@ def verifier():
         prior, qx, qy, grid_size, path_length, is_safe
     )
     MatSatUtils.save_posterior(posterior, grid_size)
+
+    # Print prior and posterior beliefs if flag is set
+    if print_beliefs:
+        print_ln("=== PRIOR BELIEFS (before query) ===")
+        for i in range(grid_size):
+            for j in range(grid_size):
+                print_ln("prior[%s][%s] = %s", i, j, prior[i][j].reveal())
+
+        print_ln("=== POSTERIOR BELIEFS (after query) ===")
+        for i in range(grid_size):
+            for j in range(grid_size):
+                print_ln("posterior[%s][%s] = %s", i, j, posterior[i][j].reveal())
+        print_ln("=== END BELIEFS ===")
 
     print_ln("information_gain= %s", info_gain.reveal())
     print_ln("Path is safe: %s", is_safe.reveal())
